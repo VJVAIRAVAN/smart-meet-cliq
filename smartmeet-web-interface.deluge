@@ -1,0 +1,531 @@
+/*
+ * SmartMeet Web Interface - Deluge Script for Zoho Creator
+ * Provides web interface functionality for SmartMeet
+ */
+
+// Generate HTML for SmartMeet dashboard
+String smartmeet_generate_dashboard_html()
+{
+    html = "<!DOCTYPE html>";
+    html = html + "<html lang='en'>";
+    html = html + "<head>";
+    html = html + "<meta charset='UTF-8'>";
+    html = html + "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html = html + "<title>SmartMeet AI Dashboard</title>";
+    html = html + "<link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>";
+    html = html + "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>";
+    html = html + smartmeet_get_dashboard_css();
+    html = html + "</head>";
+    html = html + "<body>";
+    
+    // Header section
+    html = html + "<div class='shell'>";
+    html = html + "<header class='hero'>";
+    html = html + "<div class='hero-copy'>";
+    html = html + "<div class='badge-row'>";
+    html = html + "<span class='badge'><i class='bx bx-shield-quarter'></i> Consent-first capture</span>";
+    html = html + "<span class='badge'><i class='bx bx-brain'></i> LLM-powered summaries</span>";
+    html = html + "<span class='badge'><i class='bx bx-mail-send'></i> Auto email dispatch</span>";
+    html = html + "</div>";
+    html = html + "<h1>SmartMeet AI Dashboard</h1>";
+    html = html + "<p>Drop-in capture + summarization assistant that listens to Zoom, Microsoft Teams, Google Meet, and Zoho Cliq sessions, generates structured meeting notes, and distributes them to every attendee within minutes.</p>";
+    
+    // Metrics section
+    html = html + smartmeet_generate_metrics_html();
+    
+    // Control buttons
+    html = html + "<div class='hero-cta'>";
+    html = html + "<button class='primary start hero-btn' onclick='startNewMeeting()' type='button'>";
+    html = html + "<i class='bx bx-rocket'></i> Start New Meeting";
+    html = html + "</button>";
+    html = html + "<button class='primary outline hero-btn' onclick='viewMeetings()' type='button'>";
+    html = html + "<i class='bx bx-history'></i> View Meeting History";
+    html = html + "</button>";
+    html = html + "</div>";
+    html = html + "</div>";
+    
+    // Visual elements
+    html = html + smartmeet_generate_visual_elements();
+    html = html + "</header>";
+    
+    // Platform cards
+    html = html + smartmeet_generate_platform_cards();
+    
+    // Meeting interface
+    html = html + smartmeet_generate_meeting_interface();
+    
+    // Recent meetings
+    html = html + smartmeet_generate_recent_meetings();
+    
+    // Footer
+    html = html + "<footer>SmartMeet AI Dashboard - Powered by Zoho Deluge</footer>";
+    html = html + "</div>";
+    
+    // JavaScript
+    html = html + smartmeet_get_dashboard_javascript();
+    html = html + "</body>";
+    html = html + "</html>";
+    
+    return html;
+}
+
+// Generate metrics HTML
+String smartmeet_generate_metrics_html()
+{
+    // Get real metrics from database
+    total_meetings = SmartMeet_Meetings[ID != null].size();
+    completed_meetings = SmartMeet_Meetings[Status == "completed"].size();
+    active_sessions = SmartMeet_Meetings[Status == "recording" || Status == "processing"].size();
+    
+    completion_rate = 0;
+    if(total_meetings > 0)
+    {
+        completion_rate = (completed_meetings * 100) / total_meetings;
+    }
+    
+    html = "<div class='hero-metrics'>";
+    html = html + "<article class='hero-metric'>";
+    html = html + "<span>Total Meetings</span>";
+    html = html + "<strong>" + total_meetings + "</strong>";
+    html = html + "<small>All platforms combined</small>";
+    html = html + "</article>";
+    
+    html = html + "<article class='hero-metric'>";
+    html = html + "<span>Completion Rate</span>";
+    html = html + "<strong>" + completion_rate + "%</strong>";
+    html = html + "<small>Successfully processed</small>";
+    html = html + "</article>";
+    
+    html = html + "<article class='hero-metric'>";
+    html = html + "<span>Active Sessions</span>";
+    html = html + "<strong>" + active_sessions + "</strong>";
+    html = html + "<small>Currently recording</small>";
+    html = html + "</article>";
+    html = html + "</div>";
+    
+    return html;
+}
+
+// Generate visual elements
+String smartmeet_generate_visual_elements()
+{
+    html = "<div class='hero-visual' aria-hidden='true'>";
+    html = html + "<div class='orb orb-one'></div>";
+    html = html + "<div class='orb orb-two'></div>";
+    html = html + "<div class='radar'>";
+    html = html + "<div class='radar-ring ring-one'></div>";
+    html = html + "<div class='radar-ring ring-two'></div>";
+    html = html + "<div class='radar-ring ring-three'></div>";
+    html = html + "<div class='radar-ping'></div>";
+    html = html + "</div>";
+    html = html + "<div class='hero-chip chip-status'>";
+    html = html + "<span>System Status</span>";
+    html = html + "<strong>Online</strong>";
+    html = html + "</div>";
+    html = html + "</div>";
+    
+    return html;
+}
+
+// Generate platform cards
+String smartmeet_generate_platform_cards()
+{
+    html = "<section class='grid'>";
+    
+    platforms = {
+        {"name": "Zoom", "icon": "bx-video", "description": "Connect with Zoom Meeting SDK for seamless recording and participant management."},
+        {"name": "Microsoft Teams", "icon": "bx-group", "description": "Integrate with Teams Graph API for channel recordings and adaptive cards."},
+        {"name": "Google Meet", "icon": "bx-phone-call", "description": "Capture Google Meet sessions with Calendar API integration and Gmail delivery."},
+        {"name": "Zoho Cliq", "icon": "bx-chat", "description": "Native Zoho Cliq integration with bot commands and channel notifications."}
+    };
+    
+    for each platform in platforms
+    {
+        html = html + "<article class='card'>";
+        html = html + "<h3><i class='bx " + platform.get("icon") + "'></i> " + platform.get("name") + "</h3>";
+        html = html + "<p>" + platform.get("description") + "</p>";
+        html = html + "</article>";
+    }
+    
+    html = html + "</section>";
+    
+    return html;
+}
+
+// Generate meeting interface
+String smartmeet_generate_meeting_interface()
+{
+    html = "<section class='meeting-interface'>";
+    html = html + "<div class='interface-header'>";
+    html = html + "<h2>Meeting Control Center</h2>";
+    html = html + "<p class='widget-subtitle'>Start, monitor, and manage your meeting recordings across all platforms.</p>";
+    html = html + "</div>";
+    
+    html = html + "<div class='meeting-shell'>";
+    html = html + "<div class='meeting-toolbar'>";
+    html = html + "<div class='platform-group' id='platform-group'>";
+    html = html + "<button class='platform-pill active' data-platform='zoom' type='button'>Zoom</button>";
+    html = html + "<button class='platform-pill' data-platform='teams' type='button'>Teams</button>";
+    html = html + "<button class='platform-pill' data-platform='gmeet' type='button'>Google Meet</button>";
+    html = html + "<button class='platform-pill' data-platform='cliq' type='button'>Zoho Cliq</button>";
+    html = html + "</div>";
+    html = html + "<div class='meeting-status'>";
+    html = html + "<span class='status-pill' id='status-pill'><i class='bx bx-pulse'></i> Ready</span>";
+    html = html + "</div>";
+    html = html + "</div>";
+    
+    // Meeting form
+    html = html + "<div class='meeting-form'>";
+    html = html + "<div class='form-group'>";
+    html = html + "<label for='meeting-url'>Meeting URL</label>";
+    html = html + "<input type='url' id='meeting-url' placeholder='Enter meeting URL...' />";
+    html = html + "</div>";
+    html = html + "<div class='form-group'>";
+    html = html + "<label for='meeting-title'>Meeting Title (Optional)</label>";
+    html = html + "<input type='text' id='meeting-title' placeholder='Enter meeting title...' />";
+    html = html + "</div>";
+    html = html + "<div class='form-actions'>";
+    html = html + "<button class='primary start' onclick='startMeetingCapture()' type='button'>";
+    html = html + "<i class='bx bx-play-circle'></i> Start Capture";
+    html = html + "</button>";
+    html = html + "<button class='primary outline' onclick='testConnection()' type='button'>";
+    html = html + "<i class='bx bx-wifi'></i> Test Connection";
+    html = html + "</button>";
+    html = html + "</div>";
+    html = html + "</div>";
+    
+    html = html + "</div>";
+    html = html + "</section>";
+    
+    return html;
+}
+
+// Generate recent meetings section
+String smartmeet_generate_recent_meetings()
+{
+    // Get recent meetings from database
+    recent_meetings = SmartMeet_Meetings[ID != null] limit 0, 5;
+    
+    html = "<section class='recent-meetings'>";
+    html = html + "<div class='section-header'>";
+    html = html + "<h3>Recent Meetings</h3>";
+    html = html + "<button class='ghost-btn' onclick='viewAllMeetings()'>View All <i class='bx bx-right-arrow-alt'></i></button>";
+    html = html + "</div>";
+    
+    if(recent_meetings.size() > 0)
+    {
+        html = html + "<div class='meetings-list'>";
+        
+        for each meeting in recent_meetings
+        {
+            status_class = "status-" + meeting.get("Status").toLowerCase();
+            platform_icon = smartmeet_get_platform_icon(meeting.get("Platform"));
+            
+            html = html + "<div class='meeting-item'>";
+            html = html + "<div class='meeting-info'>";
+            html = html + "<div class='meeting-header'>";
+            html = html + "<i class='bx " + platform_icon + "'></i>";
+            html = html + "<span class='meeting-platform'>" + meeting.get("Platform").toUpperCase() + "</span>";
+            html = html + "<span class='meeting-status " + status_class + "'>" + meeting.get("Status") + "</span>";
+            html = html + "</div>";
+            html = html + "<div class='meeting-details'>";
+            html = html + "<p class='meeting-time'>" + meeting.get("Created_Time").toString("MMM dd, yyyy HH:mm") + "</p>";
+            html = html + "<p class='meeting-id'>ID: " + meeting.get("Meeting_ID").substring(0, 8) + "...</p>";
+            html = html + "</div>";
+            html = html + "</div>";
+            html = html + "<div class='meeting-actions'>";
+            html = html + "<button class='action-btn' onclick='viewMeeting(\"" + meeting.get("Meeting_ID") + "\")'>";
+            html = html + "<i class='bx bx-show'></i>";
+            html = html + "</button>";
+            if(meeting.get("Status") == "completed")
+            {
+                html = html + "<button class='action-btn' onclick='downloadSummary(\"" + meeting.get("Meeting_ID") + "\")'>";
+                html = html + "<i class='bx bx-download'></i>";
+                html = html + "</button>";
+            }
+            html = html + "</div>";
+            html = html + "</div>";
+        }
+        
+        html = html + "</div>";
+    }
+    else
+    {
+        html = html + "<div class='empty-state'>";
+        html = html + "<i class='bx bx-calendar-x'></i>";
+        html = html + "<p>No meetings recorded yet. Start your first meeting capture above!</p>";
+        html = html + "</div>";
+    }
+    
+    html = html + "</section>";
+    
+    return html;
+}
+
+// Get platform icon
+String smartmeet_get_platform_icon(String platform)
+{
+    icons = Map();
+    icons.put("zoom", "bx-video");
+    icons.put("teams", "bx-group");
+    icons.put("gmeet", "bx-phone-call");
+    icons.put("cliq", "bx-chat");
+    
+    return icons.get(platform, "bx-calendar");
+}
+
+// Generate CSS styles
+String smartmeet_get_dashboard_css()
+{
+    css = "<style>";
+    css = css + ":root {";
+    css = css + "  --bg: #05060a;";
+    css = css + "  --card: #10121b;";
+    css = css + "  --border: rgba(255, 255, 255, 0.08);";
+    css = css + "  --accent: #71f3ff;";
+    css = css + "  --text: #f3f5ff;";
+    css = css + "  --muted: #98a2c3;";
+    css = css + "  --success: #4ade80;";
+    css = css + "}";
+    
+    css = css + "* { box-sizing: border-box; margin: 0; padding: 0; }";
+    css = css + "body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }";
+    css = css + ".shell { max-width: 1200px; margin: 0 auto; padding: 20px; }";
+    
+    css = css + ".hero { padding: 40px; border: 1px solid var(--border); border-radius: 24px; background: var(--card); margin-bottom: 30px; }";
+    css = css + ".hero h1 { font-size: 2.5rem; margin-bottom: 16px; }";
+    css = css + ".hero p { color: var(--muted); margin-bottom: 24px; }";
+    
+    css = css + ".badge-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }";
+    css = css + ".badge { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 20px; font-size: 0.9rem; }";
+    
+    css = css + ".hero-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 24px 0; }";
+    css = css + ".hero-metric { padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,0.02); }";
+    css = css + ".hero-metric span { color: var(--muted); font-size: 0.9rem; }";
+    css = css + ".hero-metric strong { font-size: 2rem; display: block; margin: 8px 0; }";
+    
+    css = css + ".hero-cta { display: flex; gap: 16px; flex-wrap: wrap; }";
+    css = css + ".primary { padding: 14px 24px; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; }";
+    css = css + ".primary.start { background: linear-gradient(135deg, var(--accent), #4889ff); color: #000; }";
+    css = css + ".primary.outline { background: transparent; color: var(--text); border: 1px solid var(--border); }";
+    
+    css = css + ".grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin: 30px 0; }";
+    css = css + ".card { padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); }";
+    css = css + ".card h3 { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }";
+    css = css + ".card p { color: var(--muted); line-height: 1.5; }";
+    
+    css = css + ".meeting-interface { margin: 40px 0; }";
+    css = css + ".interface-header { text-align: center; margin-bottom: 30px; }";
+    css = css + ".meeting-shell { border: 1px solid var(--border); border-radius: 20px; background: var(--card); overflow: hidden; }";
+    css = css + ".meeting-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border); }";
+    
+    css = css + ".platform-group { display: flex; gap: 8px; }";
+    css = css + ".platform-pill { padding: 8px 16px; border: 1px solid var(--border); border-radius: 20px; background: transparent; color: var(--muted); cursor: pointer; }";
+    css = css + ".platform-pill.active { background: rgba(113, 243, 255, 0.15); border-color: var(--accent); color: var(--text); }";
+    
+    css = css + ".status-pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; background: rgba(113, 243, 255, 0.12); border: 1px solid rgba(113, 243, 255, 0.3); font-size: 0.85rem; }";
+    
+    css = css + ".meeting-form { padding: 24px; }";
+    css = css + ".form-group { margin-bottom: 20px; }";
+    css = css + ".form-group label { display: block; margin-bottom: 8px; font-weight: 500; }";
+    css = css + ".form-group input { width: 100%; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.05); color: var(--text); }";
+    css = css + ".form-actions { display: flex; gap: 12px; }";
+    
+    css = css + ".recent-meetings { margin: 40px 0; }";
+    css = css + ".section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }";
+    css = css + ".ghost-btn { background: none; border: none; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 4px; }";
+    
+    css = css + ".meetings-list { display: grid; gap: 16px; }";
+    css = css + ".meeting-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }";
+    css = css + ".meeting-info { flex: 1; }";
+    css = css + ".meeting-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }";
+    css = css + ".meeting-platform { font-weight: 600; font-size: 0.85rem; }";
+    css = css + ".meeting-status { padding: 4px 8px; border-radius: 12px; font-size: 0.75rem; text-transform: uppercase; }";
+    css = css + ".status-completed { background: rgba(74, 222, 128, 0.2); color: var(--success); }";
+    css = css + ".status-recording { background: rgba(239, 68, 68, 0.2); color: #ef4444; }";
+    css = css + ".status-processing { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }";
+    
+    css = css + ".meeting-details p { color: var(--muted); font-size: 0.85rem; }";
+    css = css + ".meeting-actions { display: flex; gap: 8px; }";
+    css = css + ".action-btn { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }";
+    css = css + ".action-btn:hover { color: var(--accent); border-color: var(--accent); }";
+    
+    css = css + ".empty-state { text-align: center; padding: 40px; color: var(--muted); }";
+    css = css + ".empty-state i { font-size: 3rem; margin-bottom: 16px; display: block; }";
+    
+    css = css + "footer { text-align: center; margin-top: 40px; color: var(--muted); font-size: 0.9rem; }";
+    
+    css = css + "</style>";
+    
+    return css;
+}
+
+// Generate JavaScript functionality
+String smartmeet_get_dashboard_javascript()
+{
+    js = "<script>";
+    
+    js = js + "let activePlatform = 'zoom';";
+    js = js + "let currentSession = null;";
+    
+    // Platform switching
+    js = js + "document.addEventListener('DOMContentLoaded', function() {";
+    js = js + "  const platformButtons = document.querySelectorAll('.platform-pill');";
+    js = js + "  platformButtons.forEach(button => {";
+    js = js + "    button.addEventListener('click', function() {";
+    js = js + "      platformButtons.forEach(btn => btn.classList.remove('active'));";
+    js = js + "      this.classList.add('active');";
+    js = js + "      activePlatform = this.dataset.platform;";
+    js = js + "      updateStatus('Connected to ' + this.textContent);";
+    js = js + "    });";
+    js = js + "  });";
+    js = js + "});";
+    
+    // Update status function
+    js = js + "function updateStatus(message, icon = 'bx-pulse') {";
+    js = js + "  const statusPill = document.getElementById('status-pill');";
+    js = js + "  if (statusPill) {";
+    js = js + "    statusPill.innerHTML = '<i class=\"bx ' + icon + '\"></i> ' + message;";
+    js = js + "  }";
+    js = js + "}";
+    
+    // Start meeting capture
+    js = js + "async function startMeetingCapture() {";
+    js = js + "  const meetingUrl = document.getElementById('meeting-url').value;";
+    js = js + "  const meetingTitle = document.getElementById('meeting-title').value;";
+    js = js + "  ";
+    js = js + "  if (!meetingUrl) {";
+    js = js + "    alert('Please enter a meeting URL');";
+    js = js + "    return;";
+    js = js + "  }";
+    js = js + "  ";
+    js = js + "  updateStatus('Starting capture...', 'bx-loader-alt');";
+    js = js + "  ";
+    js = js + "  try {";
+    js = js + "    // Call Deluge function to create session";
+    js = js + "    const sessionData = {";
+    js = js + "      platform: activePlatform,";
+    js = js + "      meeting_link: meetingUrl,";
+    js = js + "      title: meetingTitle,";
+    js = js + "      emails: [],";
+    js = js + "      members: []";
+    js = js + "    };";
+    js = js + "    ";
+    js = js + "    // This would call your Deluge function";
+    js = js + "    console.log('Creating session:', sessionData);";
+    js = js + "    updateStatus('Capture started', 'bx-check-circle');";
+    js = js + "    ";
+    js = js + "    // Clear form";
+    js = js + "    document.getElementById('meeting-url').value = '';";
+    js = js + "    document.getElementById('meeting-title').value = '';";
+    js = js + "    ";
+    js = js + "  } catch (error) {";
+    js = js + "    console.error('Error starting capture:', error);";
+    js = js + "    updateStatus('Error starting capture', 'bx-error');";
+    js = js + "  }";
+    js = js + "}";
+    
+    // Test connection
+    js = js + "function testConnection() {";
+    js = js + "  updateStatus('Testing connection...', 'bx-loader-alt');";
+    js = js + "  ";
+    js = js + "  setTimeout(() => {";
+    js = js + "    updateStatus('Connection successful', 'bx-check-circle');";
+    js = js + "  }, 1500);";
+    js = js + "}";
+    
+    // View meeting
+    js = js + "function viewMeeting(meetingId) {";
+    js = js + "  console.log('Viewing meeting:', meetingId);";
+    js = js + "  // Implement meeting details view";
+    js = js + "}";
+    
+    // Download summary
+    js = js + "function downloadSummary(meetingId) {";
+    js = js + "  console.log('Downloading summary for:', meetingId);";
+    js = js + "  // Implement summary download";
+    js = js + "}";
+    
+    // View all meetings
+    js = js + "function viewAllMeetings() {";
+    js = js + "  console.log('Viewing all meetings');";
+    js = js + "  // Implement meetings list view";
+    js = js + "}";
+    
+    js = js + "</script>";
+    
+    return js;
+}
+
+// Generate meeting details page
+String smartmeet_generate_meeting_details(String meeting_id)
+{
+    // Get meeting from database
+    meeting_records = SmartMeet_Meetings[Meeting_ID == meeting_id];
+    
+    if(meeting_records.isEmpty())
+    {
+        return "<html><body><h1>Meeting not found</h1></body></html>";
+    }
+    
+    meeting = meeting_records.get(0);
+    participants = SmartMeet_Participants[Meeting_ID == meeting_id];
+    
+    html = "<!DOCTYPE html>";
+    html = html + "<html><head><title>Meeting Details - " + meeting_id + "</title>";
+    html = html + smartmeet_get_dashboard_css();
+    html = html + "</head><body>";
+    
+    html = html + "<div class='shell'>";
+    html = html + "<header class='meeting-header'>";
+    html = html + "<h1>Meeting Details</h1>";
+    html = html + "<p>Session ID: " + meeting_id + "</p>";
+    html = html + "</header>";
+    
+    // Meeting info
+    html = html + "<section class='meeting-details-section'>";
+    html = html + "<div class='detail-card'>";
+    html = html + "<h3>Meeting Information</h3>";
+    html = html + "<p><strong>Platform:</strong> " + meeting.get("Platform") + "</p>";
+    html = html + "<p><strong>Status:</strong> " + meeting.get("Status") + "</p>";
+    html = html + "<p><strong>Created:</strong> " + meeting.get("Created_Time") + "</p>";
+    html = html + "<p><strong>Meeting Link:</strong> <a href='" + meeting.get("Meeting_Link") + "' target='_blank'>" + meeting.get("Meeting_Link") + "</a></p>";
+    html = html + "</div>";
+    
+    // Participants
+    if(participants.size() > 0)
+    {
+        html = html + "<div class='detail-card'>";
+        html = html + "<h3>Participants (" + participants.size() + ")</h3>";
+        html = html + "<ul class='participants-list'>";
+        
+        for each participant in participants
+        {
+            html = html + "<li>";
+            html = html + "<strong>" + participant.get("Name") + "</strong> ";
+            html = html + "(" + participant.get("Email") + ") - ";
+            html = html + "<span class='role'>" + participant.get("Role") + "</span>";
+            html = html + "</li>";
+        }
+        
+        html = html + "</ul>";
+        html = html + "</div>";
+    }
+    
+    // Summary if completed
+    if(meeting.get("Status") == "completed" && !meeting.get("Summary_Data").isEmpty())
+    {
+        html = html + "<div class='detail-card'>";
+        html = html + "<h3>Meeting Summary</h3>";
+        html = html + "<div class='summary-content'>";
+        html = html + meeting.get("Summary_Data");
+        html = html + "</div>";
+        html = html + "</div>";
+    }
+    
+    html = html + "</section>";
+    html = html + "</div>";
+    html = html + "</body></html>";
+    
+    return html;
+}

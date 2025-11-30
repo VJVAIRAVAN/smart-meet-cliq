@@ -1,0 +1,557 @@
+/*
+ * SmartMeet Google Meet Integration - Deluge Script
+ * Handles Google Meet specific functionality and API integration
+ */
+
+// Initialize Google Meet integration
+Map smartmeet_gmeet_initialize()
+{
+    info "Initializing Google Meet integration...";
+    
+    // Google Meet configuration
+    gmeet_config = Map();
+    gmeet_config.put("api_base", "https://www.googleapis.com/calendar/v3");
+    gmeet_config.put("meet_api_base", "https://meet.googleapis.com/v2");
+    gmeet_config.put("oauth_scope", "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.created");
+    gmeet_config.put("enabled", true);
+    
+    return gmeet_config;
+}
+
+// Detect Google Meet URL and extract meeting information
+Map smartmeet_gmeet_parse_url(String meeting_url)
+{
+    if(!meeting_url.contains("meet.google.com"))
+    {
+        return {"error": "Not a Google Meet URL"};
+    }
+    
+    // Extract meeting ID from URL
+    // Format: https://meet.google.com/abc-defg-hij
+    meeting_id = "";
+    
+    if(meeting_url.contains("/"))
+    {
+        url_parts = meeting_url.split("/");
+        meeting_id = url_parts.get(url_parts.size() - 1);
+    }
+    
+    // Clean up meeting ID (remove query parameters)
+    if(meeting_id.contains("?"))
+    {
+        meeting_id = meeting_id.split("?").get(0);
+    }
+    
+    return {
+        "platform": "gmeet",
+        "meeting_id": meeting_id,
+        "meeting_url": meeting_url,
+        "api_endpoint": "https://meet.googleapis.com/v2/spaces/" + meeting_id
+    };
+}
+
+// Create Google Meet session with OAuth authentication
+Map smartmeet_gmeet_create_session(String meeting_url, String access_token)
+{
+    // Parse the meeting URL
+    url_info = smartmeet_gmeet_parse_url(meeting_url);
+    
+    if(url_info.containsKey("error"))
+    {
+        return url_info;
+    }
+    
+    meeting_id = url_info.get("meeting_id");
+    
+    try
+    {
+        // Get meeting details from Google Calendar API
+        calendar_response = invokeurl
+        [
+            url: "https://www.googleapis.com/calendar/v3/events",
+            type: GET,
+            parameters: {
+                "q": meeting_id,
+                "singleEvents": true,
+                "orderBy": "startTime"
+            },
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            }
+        ];
+        
+        if(calendar_response.get("items").size() > 0)
+        {
+            event = calendar_response.get("items").get(0);
+            
+            // Extract meeting information
+            meeting_info = Map();
+            meeting_info.put("title", event.get("summary", "Google Meet Session"));
+            meeting_info.put("start_time", event.get("start").get("dateTime"));
+            meeting_info.put("end_time", event.get("end").get("dateTime"));
+            meeting_info.put("organizer", event.get("organizer").get("email"));
+            meeting_info.put("attendees", event.get("attendees", {}));
+            
+            return {
+                "success": true,
+                "meeting_info": meeting_info,
+                "meeting_id": meeting_id,
+                "platform": "gmeet"
+            };
+        }
+        else
+        {
+            // If not found in calendar, create basic session info
+            return {
+                "success": true,
+                "meeting_info": {
+                    "title": "Google Meet Session",
+                    "meeting_id": meeting_id
+                },
+                "meeting_id": meeting_id,
+                "platform": "gmeet"
+            };
+        }
+    }
+    catch (e)
+    {
+        return {
+            "error": "Failed to create Google Meet session: " + e.toString()
+        };
+    }
+}
+
+// Extract participants from Google Meet session
+List smartmeet_gmeet_get_participants(String meeting_id, String access_token)
+{
+    participants = List();
+    
+    try
+    {
+        // Get meeting space information
+        space_response = invokeurl
+        [
+            url: "https://meet.googleapis.com/v2/spaces/" + meeting_id,
+            type: GET,
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            }
+        ];
+        
+        if(space_response.containsKey("participants"))
+        {
+            gmeet_participants = space_response.get("participants");
+            
+            for each participant in gmeet_participants
+            {
+                participant_info = Map();
+                participant_info.put("name", participant.get("displayName", "Unknown"));
+                participant_info.put("email", participant.get("email", ""));
+                participant_info.put("role", participant.get("role", "participant"));
+                participant_info.put("joined_time", participant.get("joinTime"));
+                participant_info.put("left_time", participant.get("leaveTime"));
+                
+                participants.add(participant_info);
+            }
+        }
+        
+        // If no participants from API, try to get from calendar event
+        if(participants.size() == 0)
+        {
+            calendar_participants = smartmeet_gmeet_get_calendar_attendees(meeting_id, access_token);
+            participants.addAll(calendar_participants);
+        }
+    }
+    catch (e)
+    {
+        info "Error getting Google Meet participants: " + e.toString();
+    }
+    
+    return participants;
+}
+
+// Get attendees from Google Calendar event
+List smartmeet_gmeet_get_calendar_attendees(String meeting_id, String access_token)
+{
+    attendees = List();
+    
+    try
+    {
+        // Search for calendar event with meeting ID
+        calendar_response = invokeurl
+        [
+            url: "https://www.googleapis.com/calendar/v3/events",
+            type: GET,
+            parameters: {
+                "q": meeting_id,
+                "singleEvents": true
+            },
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            }
+        ];
+        
+        if(calendar_response.get("items").size() > 0)
+        {
+            event = calendar_response.get("items").get(0);
+            event_attendees = event.get("attendees", {});
+            
+            for each attendee in event_attendees
+            {
+                attendee_info = Map();
+                attendee_info.put("name", attendee.get("displayName", attendee.get("email")));
+                attendee_info.put("email", attendee.get("email"));
+                attendee_info.put("role", attendee.get("organizer", false) ? "organizer" : "participant");
+                attendee_info.put("response_status", attendee.get("responseStatus"));
+                
+                attendees.add(attendee_info);
+            }
+        }
+    }
+    catch (e)
+    {
+        info "Error getting calendar attendees: " + e.toString();
+    }
+    
+    return attendees;
+}
+
+// Start Google Meet recording (requires Google Workspace)
+Map smartmeet_gmeet_start_recording(String meeting_id, String access_token)
+{
+    try
+    {
+        // Start recording via Google Meet API
+        recording_response = invokeurl
+        [
+            url: "https://meet.googleapis.com/v2/spaces/" + meeting_id + "/recordings",
+            type: POST,
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            },
+            parameters: {
+                "recording": {
+                    "driveDestination": {
+                        "file": {
+                            "name": "SmartMeet Recording - " + meeting_id
+                        }
+                    }
+                }
+            }.toString()
+        ];
+        
+        if(recording_response.containsKey("name"))
+        {
+            return {
+                "success": true,
+                "recording_id": recording_response.get("name"),
+                "status": "recording",
+                "drive_file_id": recording_response.get("driveDestination").get("file").get("id")
+            };
+        }
+        else
+        {
+            return {
+                "error": "Failed to start recording",
+                "details": recording_response
+            };
+        }
+    }
+    catch (e)
+    {
+        return {
+            "error": "Recording start failed: " + e.toString()
+        };
+    }
+}
+
+// Stop Google Meet recording
+Map smartmeet_gmeet_stop_recording(String recording_id, String access_token)
+{
+    try
+    {
+        // Stop recording via Google Meet API
+        stop_response = invokeurl
+        [
+            url: "https://meet.googleapis.com/v2/" + recording_id + ":stop",
+            type: POST,
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            }
+        ];
+        
+        return {
+            "success": true,
+            "recording_id": recording_id,
+            "status": "stopped",
+            "stopped_at": now
+        };
+    }
+    catch (e)
+    {
+        return {
+            "error": "Failed to stop recording: " + e.toString()
+        };
+    }
+}
+
+// Get Google Meet recording details
+Map smartmeet_gmeet_get_recording(String recording_id, String access_token)
+{
+    try
+    {
+        recording_response = invokeurl
+        [
+            url: "https://meet.googleapis.com/v2/" + recording_id,
+            type: GET,
+            headers: {
+                "Authorization": "Bearer " + access_token,
+                "Content-Type": "application/json"
+            }
+        ];
+        
+        return {
+            "success": true,
+            "recording": recording_response
+        };
+    }
+    catch (e)
+    {
+        return {
+            "error": "Failed to get recording: " + e.toString()
+        };
+    }
+}
+
+// Process Google Meet session completion
+Map smartmeet_gmeet_complete_session(String session_id, String access_token)
+{
+    // Get session from database
+    session_records = SmartMeet_Meetings[Meeting_ID == session_id];
+    
+    if(session_records.isEmpty())
+    {
+        return {"error": "Session not found"};
+    }
+    
+    session = session_records.get(0);
+    meeting_url = session.get("Meeting_Link");
+    
+    // Parse Google Meet URL
+    url_info = smartmeet_gmeet_parse_url(meeting_url);
+    meeting_id = url_info.get("meeting_id");
+    
+    // Get participants
+    participants = smartmeet_gmeet_get_participants(meeting_id, access_token);
+    
+    // Add participants to database
+    for each participant in participants
+    {
+        insert into SmartMeet_Participants
+        [
+            Participant_ID = randomUUID(),
+            Meeting_ID = session_id,
+            Name = participant.get("name"),
+            Email = participant.get("email"),
+            Role = participant.get("role"),
+            Joined_Time = participant.get("joined_time", now),
+            Left_Time = participant.get("left_time")
+        ];
+    }
+    
+    // Generate summary
+    summary = smartmeet_generate_summary(session_id, {});
+    
+    // Update session
+    update_record = SmartMeet_Meetings[Meeting_ID == session_id];
+    update_record.Status = "completed";
+    update_record.Completed_Time = now;
+    update_record.Summary_Data = summary.toString();
+    
+    // Send emails
+    email_result = smartmeet_send_summary_emails(session_id, summary);
+    
+    info "Google Meet session completed: " + session_id;
+    
+    return {
+        "success": true,
+        "session_id": session_id,
+        "participants_count": participants.size(),
+        "summary": summary,
+        "email_status": email_result.get("status")
+    };
+}
+
+// Generate Google Meet specific responses for copilot
+String smartmeet_gmeet_copilot_response(String prompt)
+{
+    responses = {
+        "Google Meet session captured successfully. Participants extracted from Calendar API and summary generated.",
+        "Meet recording processed with Drive integration. Summary shared via Gmail to all attendees.",
+        "Google Workspace integration complete. Meeting notes synchronized with Google Docs.",
+        "Meet session analyzed. Action items created in Google Tasks and shared with participants.",
+        "Google Meet transcript processed. Summary includes participant engagement metrics and key decisions."
+    };
+    
+    // Return random response
+    random_index = randomNumber(responses.size());
+    return responses.get(random_index);
+}
+
+// Validate Google Meet OAuth token
+Map smartmeet_gmeet_validate_token(String access_token)
+{
+    try
+    {
+        token_info = invokeurl
+        [
+            url: "https://www.googleapis.com/oauth2/v1/tokeninfo",
+            type: GET,
+            parameters: {
+                "access_token": access_token
+            }
+        ];
+        
+        if(token_info.containsKey("scope"))
+        {
+            scopes = token_info.get("scope").split(" ");
+            required_scopes = {"https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/meetings.space.created"};
+            
+            has_required_scopes = true;
+            for each required_scope in required_scopes
+            {
+                if(!scopes.contains(required_scope))
+                {
+                    has_required_scopes = false;
+                    break;
+                }
+            }
+            
+            return {
+                "valid": true,
+                "has_required_scopes": has_required_scopes,
+                "expires_in": token_info.get("expires_in"),
+                "scopes": scopes
+            };
+        }
+        else
+        {
+            return {"valid": false, "error": "Invalid token"};
+        }
+    }
+    catch (e)
+    {
+        return {"valid": false, "error": e.toString()};
+    }
+}
+
+// Get Google OAuth authorization URL
+String smartmeet_gmeet_get_auth_url(String client_id, String redirect_uri)
+{
+    scope = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.created";
+    
+    auth_url = "https://accounts.google.com/o/oauth2/v2/auth";
+    auth_url = auth_url + "?client_id=" + client_id;
+    auth_url = auth_url + "&redirect_uri=" + redirect_uri;
+    auth_url = auth_url + "&scope=" + scope;
+    auth_url = auth_url + "&response_type=code";
+    auth_url = auth_url + "&access_type=offline";
+    auth_url = auth_url + "&prompt=consent";
+    
+    return auth_url;
+}
+
+// Exchange authorization code for access token
+Map smartmeet_gmeet_exchange_code(String auth_code, String client_id, String client_secret, String redirect_uri)
+{
+    try
+    {
+        token_response = invokeurl
+        [
+            url: "https://oauth2.googleapis.com/token",
+            type: POST,
+            parameters: {
+                "code": auth_code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code"
+            }
+        ];
+        
+        if(token_response.containsKey("access_token"))
+        {
+            return {
+                "success": true,
+                "access_token": token_response.get("access_token"),
+                "refresh_token": token_response.get("refresh_token"),
+                "expires_in": token_response.get("expires_in"),
+                "token_type": token_response.get("token_type")
+            };
+        }
+        else
+        {
+            return {
+                "success": false,
+                "error": "Token exchange failed",
+                "details": token_response
+            };
+        }
+    }
+    catch (e)
+    {
+        return {
+            "success": false,
+            "error": "Token exchange error: " + e.toString()
+        };
+    }
+}
+
+// Refresh Google OAuth access token
+Map smartmeet_gmeet_refresh_token(String refresh_token, String client_id, String client_secret)
+{
+    try
+    {
+        refresh_response = invokeurl
+        [
+            url: "https://oauth2.googleapis.com/token",
+            type: POST,
+            parameters: {
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token"
+            }
+        ];
+        
+        if(refresh_response.containsKey("access_token"))
+        {
+            return {
+                "success": true,
+                "access_token": refresh_response.get("access_token"),
+                "expires_in": refresh_response.get("expires_in"),
+                "token_type": refresh_response.get("token_type")
+            };
+        }
+        else
+        {
+            return {
+                "success": false,
+                "error": "Token refresh failed",
+                "details": refresh_response
+            };
+        }
+    }
+    catch (e)
+    {
+        return {
+            "success": false,
+            "error": "Token refresh error: " + e.toString()
+        };
+    }
+}

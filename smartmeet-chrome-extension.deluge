@@ -1,0 +1,600 @@
+/*
+ * SmartMeet Chrome Extension Integration - Deluge Script
+ * Handles Chrome extension communication and browser-based functionality
+ */
+
+// Handle Chrome extension API requests
+Map smartmeet_extension_handler(String action, Map request_data)
+{
+    try
+    {
+        if(action == "detect_meeting")
+        {
+            return smartmeet_extension_detect_meeting(request_data);
+        }
+        else if(action == "start_capture")
+        {
+            return smartmeet_extension_start_capture(request_data);
+        }
+        else if(action == "stop_capture")
+        {
+            return smartmeet_extension_stop_capture(request_data);
+        }
+        else if(action == "get_status")
+        {
+            return smartmeet_extension_get_status(request_data);
+        }
+        else if(action == "chat_message")
+        {
+            return smartmeet_extension_chat(request_data);
+        }
+        else if(action == "get_recent_meetings")
+        {
+            return smartmeet_extension_get_recent_meetings(request_data);
+        }
+        else
+        {
+            return {"error": "Unknown action: " + action};
+        }
+    }
+    catch (e)
+    {
+        return {"error": "Extension handler error: " + e.toString()};
+    }
+}
+
+// Detect meeting platform from URL
+Map smartmeet_extension_detect_meeting(Map request_data)
+{
+    url = request_data.get("url", "");
+    tab_title = request_data.get("title", "");
+    
+    if(url.isEmpty())
+    {
+        return {"error": "URL is required"};
+    }
+    
+    platform = "unknown";
+    meeting_id = "";
+    supported = false;
+    
+    // Detect Zoom
+    if(url.contains("zoom.us"))
+    {
+        platform = "zoom";
+        supported = true;
+        
+        // Extract Zoom meeting ID
+        if(url.contains("/j/"))
+        {
+            url_parts = url.split("/j/");
+            if(url_parts.size() > 1)
+            {
+                meeting_id = url_parts.get(1).split("?").get(0);
+            }
+        }
+    }
+    // Detect Microsoft Teams
+    else if(url.contains("teams.microsoft.com"))
+    {
+        platform = "teams";
+        supported = true;
+        
+        // Extract Teams meeting ID from URL
+        if(url.contains("meetup-join/"))
+        {
+            url_parts = url.split("meetup-join/");
+            if(url_parts.size() > 1)
+            {
+                meeting_id = url_parts.get(1).split("/").get(0);
+            }
+        }
+    }
+    // Detect Google Meet
+    else if(url.contains("meet.google.com"))
+    {
+        platform = "gmeet";
+        supported = true;
+        
+        // Extract Google Meet ID
+        if(url.contains("meet.google.com/"))
+        {
+            url_parts = url.split("meet.google.com/");
+            if(url_parts.size() > 1)
+            {
+                meeting_id = url_parts.get(1).split("?").get(0);
+            }
+        }
+    }
+    // Detect Zoho Cliq
+    else if(url.contains("zoho.com/cliq"))
+    {
+        platform = "cliq";
+        supported = true;
+        
+        // Extract Cliq meeting ID
+        if(url.contains("/meeting/"))
+        {
+            url_parts = url.split("/meeting/");
+            if(url_parts.size() > 1)
+            {
+                meeting_id = url_parts.get(1).split("?").get(0);
+            }
+        }
+    }
+    
+    // Generate UI injection script based on platform
+    injection_script = smartmeet_generate_injection_script(platform);
+    
+    return {
+        "platform": platform,
+        "meeting_id": meeting_id,
+        "supported": supported,
+        "url": url,
+        "title": tab_title,
+        "injection_script": injection_script,
+        "ui_elements": smartmeet_get_platform_ui_elements(platform)
+    };
+}
+
+// Start meeting capture from extension
+Map smartmeet_extension_start_capture(Map request_data)
+{
+    platform = request_data.get("platform");
+    meeting_url = request_data.get("meeting_url");
+    meeting_title = request_data.get("meeting_title", "");
+    tab_id = request_data.get("tab_id");
+    
+    if(platform.isEmpty() || meeting_url.isEmpty())
+    {
+        return {"error": "Platform and meeting URL are required"};
+    }
+    
+    // Create meeting session
+    session_result = smartmeet_create_session(platform, meeting_url, {}, {});
+    
+    if(session_result.containsKey("error"))
+    {
+        return session_result;
+    }
+    
+    session_id = session_result.get("id");
+    
+    // Start the session
+    start_result = smartmeet_start_session(session_id);
+    
+    if(start_result.containsKey("error"))
+    {
+        return start_result;
+    }
+    
+    // Store extension context
+    extension_context = Map();
+    extension_context.put("session_id", session_id);
+    extension_context.put("tab_id", tab_id);
+    extension_context.put("platform", platform);
+    extension_context.put("started_at", now);
+    
+    return {
+        "success": true,
+        "session_id": session_id,
+        "status": "recording",
+        "platform": platform,
+        "message": "Meeting capture started successfully",
+        "ui_updates": {
+            "status_text": "Recording in progress...",
+            "status_icon": "bx-record-circle",
+            "show_stop_button": true
+        }
+    };
+}
+
+// Stop meeting capture from extension
+Map smartmeet_extension_stop_capture(Map request_data)
+{
+    session_id = request_data.get("session_id");
+    
+    if(session_id.isEmpty())
+    {
+        return {"error": "Session ID is required"};
+    }
+    
+    // Complete the session
+    complete_result = smartmeet_complete_session(session_id, {});
+    
+    if(complete_result.containsKey("error"))
+    {
+        return complete_result;
+    }
+    
+    return {
+        "success": true,
+        "session_id": session_id,
+        "status": "completed",
+        "message": "Meeting capture completed and summary generated",
+        "ui_updates": {
+            "status_text": "Summary ready",
+            "status_icon": "bx-check-circle",
+            "show_download_button": true,
+            "show_stop_button": false
+        }
+    };
+}
+
+// Get extension status
+Map smartmeet_extension_get_status(Map request_data)
+{
+    // Get system status
+    system_status = smartmeet_get_extension_status();
+    
+    // Get active sessions for this extension instance
+    active_sessions = SmartMeet_Meetings[Status == "recording" || Status == "processing"];
+    
+    return {
+        "online": true,
+        "system_status": system_status,
+        "active_sessions": active_sessions.size(),
+        "supported_platforms": {"zoom", "teams", "gmeet", "cliq"},
+        "version": "1.0.0-deluge",
+        "last_sync": now
+    };
+}
+
+// Handle chat messages from extension
+Map smartmeet_extension_chat(Map request_data)
+{
+    prompt = request_data.get("prompt");
+    platform = request_data.get("platform", "zoom");
+    session_id = request_data.get("session_id");
+    
+    if(prompt.isEmpty())
+    {
+        return {"error": "Prompt is required"};
+    }
+    
+    // Generate platform-specific response
+    if(platform == "gmeet")
+    {
+        response = smartmeet_gmeet_copilot_response(prompt);
+    }
+    else
+    {
+        chat_result = smartmeet_copilot_chat(prompt, platform);
+        response = chat_result.get("response");
+    }
+    
+    return {
+        "response": response,
+        "platform": platform,
+        "timestamp": now,
+        "session_id": session_id
+    };
+}
+
+// Get recent meetings for extension
+Map smartmeet_extension_get_recent_meetings(Map request_data)
+{
+    limit = request_data.get("limit", 5);
+    
+    recent_meetings = SmartMeet_Meetings[ID != null] limit 0, limit;
+    
+    meetings_list = List();
+    
+    for each meeting in recent_meetings
+    {
+        meeting_data = Map();
+        meeting_data.put("id", meeting.get("Meeting_ID"));
+        meeting_data.put("platform", meeting.get("Platform"));
+        meeting_data.put("status", meeting.get("Status"));
+        meeting_data.put("created_at", meeting.get("Created_Time"));
+        meeting_data.put("title", meeting.get("Title", "Meeting"));
+        
+        // Get participant count
+        participants = SmartMeet_Participants[Meeting_ID == meeting.get("Meeting_ID")];
+        meeting_data.put("participant_count", participants.size());
+        
+        meetings_list.add(meeting_data);
+    }
+    
+    return {
+        "meetings": meetings_list,
+        "total_count": meetings_list.size()
+    };
+}
+
+// Generate platform-specific injection script
+String smartmeet_generate_injection_script(String platform)
+{
+    base_script = "// SmartMeet injection script for " + platform + "\n";
+    
+    if(platform == "zoom")
+    {
+        base_script = base_script + smartmeet_get_zoom_injection_script();
+    }
+    else if(platform == "teams")
+    {
+        base_script = base_script + smartmeet_get_teams_injection_script();
+    }
+    else if(platform == "gmeet")
+    {
+        base_script = base_script + smartmeet_get_gmeet_injection_script();
+    }
+    else if(platform == "cliq")
+    {
+        base_script = base_script + smartmeet_get_cliq_injection_script();
+    }
+    else
+    {
+        base_script = base_script + "// Unsupported platform\n";
+    }
+    
+    return base_script;
+}
+
+// Zoom injection script
+String smartmeet_get_zoom_injection_script()
+{
+    script = "
+    (function() {
+        // Create SmartMeet control panel for Zoom
+        const smartmeetPanel = document.createElement('div');
+        smartmeetPanel.id = 'smartmeet-zoom-panel';
+        smartmeetPanel.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 10000;
+            color: white;
+            font-family: Inter, sans-serif;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        `;
+        
+        smartmeetPanel.innerHTML = `
+            <div style='display: flex; align-items: center; gap: 8px; margin-bottom: 12px;'>
+                <div style='width: 8px; height: 8px; background: #10b981; border-radius: 50%;'></div>
+                <strong>SmartMeet AI</strong>
+            </div>
+            <div id='smartmeet-status'>Ready to capture</div>
+            <div style='margin-top: 12px; display: flex; gap: 8px;'>
+                <button id='smartmeet-start' style='flex: 1; padding: 8px; background: #3b82f6; border: none; border-radius: 6px; color: white; cursor: pointer;'>
+                    Start Capture
+                </button>
+                <button id='smartmeet-stop' style='flex: 1; padding: 8px; background: #ef4444; border: none; border-radius: 6px; color: white; cursor: pointer; display: none;'>
+                    Stop
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(smartmeetPanel);
+        
+        // Add event listeners
+        document.getElementById('smartmeet-start').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'start_capture',
+                platform: 'zoom',
+                meeting_url: window.location.href
+            });
+        });
+        
+        document.getElementById('smartmeet-stop').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'stop_capture'
+            });
+        });
+    })();
+    ";
+    
+    return script;
+}
+
+// Teams injection script
+String smartmeet_get_teams_injection_script()
+{
+    script = "
+    (function() {
+        // Create SmartMeet control panel for Teams
+        const smartmeetPanel = document.createElement('div');
+        smartmeetPanel.id = 'smartmeet-teams-panel';
+        smartmeetPanel.style.cssText = `
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            width: 280px;
+            background: #252423;
+            border: 1px solid #484644;
+            border-radius: 8px;
+            padding: 16px;
+            z-index: 10000;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+        `;
+        
+        smartmeetPanel.innerHTML = `
+            <div style='display: flex; align-items: center; gap: 8px; margin-bottom: 12px;'>
+                <div style='width: 6px; height: 6px; background: #6264a7; border-radius: 50%;'></div>
+                <strong>SmartMeet for Teams</strong>
+            </div>
+            <div id='smartmeet-teams-status'>Monitoring meeting...</div>
+            <div style='margin-top: 12px;'>
+                <button id='smartmeet-teams-capture' style='width: 100%; padding: 10px; background: #6264a7; border: none; border-radius: 4px; color: white; cursor: pointer;'>
+                    Start AI Capture
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(smartmeetPanel);
+        
+        // Teams-specific event handling
+        document.getElementById('smartmeet-teams-capture').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'start_capture',
+                platform: 'teams',
+                meeting_url: window.location.href
+            });
+        });
+    })();
+    ";
+    
+    return script;
+}
+
+// Google Meet injection script
+String smartmeet_get_gmeet_injection_script()
+{
+    script = "
+    (function() {
+        // Create SmartMeet control panel for Google Meet
+        const smartmeetPanel = document.createElement('div');
+        smartmeetPanel.id = 'smartmeet-gmeet-panel';
+        smartmeetPanel.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 320px;
+            background: #202124;
+            border: 1px solid #5f6368;
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 10000;
+            color: #e8eaed;
+            font-family: 'Google Sans', Roboto, sans-serif;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        `;
+        
+        smartmeetPanel.innerHTML = `
+            <div style='display: flex; align-items: center; gap: 10px; margin-bottom: 14px;'>
+                <svg width='16' height='16' viewBox='0 0 24 24' fill='#34a853'>
+                    <path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/>
+                </svg>
+                <strong>SmartMeet for Google Meet</strong>
+            </div>
+            <div id='smartmeet-gmeet-status' style='font-size: 14px; color: #9aa0a6; margin-bottom: 12px;'>
+                Ready to enhance your meeting
+            </div>
+            <div style='display: flex; gap: 8px;'>
+                <button id='smartmeet-gmeet-start' style='flex: 1; padding: 10px 16px; background: #1a73e8; border: none; border-radius: 20px; color: white; cursor: pointer; font-size: 14px;'>
+                    Start SmartMeet
+                </button>
+                <button id='smartmeet-gmeet-settings' style='padding: 10px; background: transparent; border: 1px solid #5f6368; border-radius: 20px; color: #e8eaed; cursor: pointer;'>
+                    ⚙️
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(smartmeetPanel);
+        
+        // Google Meet specific event handling
+        document.getElementById('smartmeet-gmeet-start').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'start_capture',
+                platform: 'gmeet',
+                meeting_url: window.location.href,
+                meeting_title: document.title
+            });
+        });
+        
+        document.getElementById('smartmeet-gmeet-settings').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'open_settings'
+            });
+        });
+    })();
+    ";
+    
+    return script;
+}
+
+// Zoho Cliq injection script
+String smartmeet_get_cliq_injection_script()
+{
+    script = "
+    (function() {
+        // Create SmartMeet control panel for Zoho Cliq
+        const smartmeetPanel = document.createElement('div');
+        smartmeetPanel.id = 'smartmeet-cliq-panel';
+        smartmeetPanel.style.cssText = `
+            position: fixed;
+            top: 60px;
+            left: 20px;
+            width: 300px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            z-index: 10000;
+            color: #fff;
+            font-family: 'Lato', sans-serif;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        `;
+        
+        smartmeetPanel.innerHTML = `
+            <div style='display: flex; align-items: center; gap: 8px; margin-bottom: 12px;'>
+                <div style='width: 8px; height: 8px; background: #ff6b35; border-radius: 50%;'></div>
+                <strong>SmartMeet + Cliq</strong>
+            </div>
+            <div id='smartmeet-cliq-status' style='font-size: 13px; color: #ccc; margin-bottom: 12px;'>
+                Native Zoho integration active
+            </div>
+            <button id='smartmeet-cliq-capture' style='width: 100%; padding: 12px; background: linear-gradient(135deg, #ff6b35, #f7931e); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;'>
+                Capture Meeting
+            </button>
+        `;
+        
+        document.body.appendChild(smartmeetPanel);
+        
+        // Cliq-specific event handling
+        document.getElementById('smartmeet-cliq-capture').addEventListener('click', function() {
+            chrome.runtime.sendMessage({
+                action: 'start_capture',
+                platform: 'cliq',
+                meeting_url: window.location.href
+            });
+        });
+    })();
+    ";
+    
+    return script;
+}
+
+// Get platform-specific UI elements configuration
+Map smartmeet_get_platform_ui_elements(String platform)
+{
+    ui_config = Map();
+    
+    if(platform == "zoom")
+    {
+        ui_config.put("panel_position", "top-right");
+        ui_config.put("panel_color", "#1f2937");
+        ui_config.put("accent_color", "#3b82f6");
+        ui_config.put("integration_points", {"toolbar", "chat", "participants"});
+    }
+    else if(platform == "teams")
+    {
+        ui_config.put("panel_position", "top-right");
+        ui_config.put("panel_color", "#252423");
+        ui_config.put("accent_color", "#6264a7");
+        ui_config.put("integration_points", {"sidebar", "chat", "meeting-controls"});
+    }
+    else if(platform == "gmeet")
+    {
+        ui_config.put("panel_position", "bottom-right");
+        ui_config.put("panel_color", "#202124");
+        ui_config.put("accent_color", "#1a73e8");
+        ui_config.put("integration_points", {"bottom-bar", "more-options", "chat"});
+    }
+    else if(platform == "cliq")
+    {
+        ui_config.put("panel_position", "top-left");
+        ui_config.put("panel_color", "#1a1a1a");
+        ui_config.put("accent_color", "#ff6b35");
+        ui_config.put("integration_points", {"sidebar", "chat", "meeting-header"});
+    }
+    
+    return ui_config;
+}

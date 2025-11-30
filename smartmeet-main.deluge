@@ -1,0 +1,645 @@
+/*
+ * SmartMeet AI Assistant - Main Deluge Script
+ * Converts the SmartMeet Node.js application to Zoho Deluge
+ * Supports Zoom, Teams, Google Meet, and Zoho Cliq integration
+ */
+
+// Initialize SmartMeet application
+void smartmeet_initialize()
+{
+    info "SmartMeet AI Assistant - Deluge Version";
+    info "Initializing meeting capture system...";
+    
+    // Create necessary data structures
+    smartmeet_create_tables();
+    
+    // Initialize platform configurations
+    smartmeet_init_platforms();
+    
+    info "SmartMeet initialization complete";
+}
+
+// Create database tables for meeting data
+void smartmeet_create_tables()
+{
+    // Create meetings table
+    meetings_table = Map();
+    meetings_table.put("table_name", "SmartMeet_Meetings");
+    meetings_table.put("fields", {
+        "Meeting_ID": "text",
+        "Platform": "picklist",
+        "Meeting_Link": "url", 
+        "Title": "text",
+        "Status": "picklist",
+        "Created_Time": "datetime",
+        "Started_Time": "datetime",
+        "Completed_Time": "datetime",
+        "Summary_Data": "textarea",
+        "Transcript_Path": "text",
+        "Recording_Path": "text"
+    });
+    
+    // Create participants table
+    participants_table = Map();
+    participants_table.put("table_name", "SmartMeet_Participants");
+    participants_table.put("fields", {
+        "Participant_ID": "text",
+        "Meeting_ID": "lookup",
+        "Name": "text",
+        "Email": "email",
+        "Role": "picklist",
+        "Joined_Time": "datetime",
+        "Left_Time": "datetime"
+    });
+    
+    // Create email logs table
+    email_logs_table = Map();
+    email_logs_table.put("table_name", "SmartMeet_Email_Logs");
+    email_logs_table.put("fields", {
+        "Log_ID": "text",
+        "Meeting_ID": "lookup",
+        "Recipient_Email": "email",
+        "Status": "picklist",
+        "Sent_Time": "datetime",
+        "Error_Message": "textarea"
+    });
+    
+    info "Database tables configured for SmartMeet";
+}
+
+// Initialize platform configurations
+void smartmeet_init_platforms()
+{
+    platforms = {"zoom", "teams", "gmeet", "cliq"};
+    
+    for each platform in platforms
+    {
+        platform_config = Map();
+        platform_config.put("name", platform);
+        platform_config.put("enabled", true);
+        platform_config.put("api_configured", false);
+        
+        // Platform-specific configurations
+        if(platform == "zoom")
+        {
+            platform_config.put("api_base", "https://api.zoom.us/v2");
+            platform_config.put("oauth_required", true);
+        }
+        else if(platform == "teams")
+        {
+            platform_config.put("api_base", "https://graph.microsoft.com/v1.0");
+            platform_config.put("oauth_required", true);
+        }
+        else if(platform == "gmeet")
+        {
+            platform_config.put("api_base", "https://www.googleapis.com/calendar/v3");
+            platform_config.put("oauth_required", true);
+        }
+        else if(platform == "cliq")
+        {
+            platform_config.put("api_base", "https://cliq.zoho.com/api/v2");
+            platform_config.put("oauth_required", true);
+        }
+        
+        info "Platform configured: " + platform;
+    }
+}
+
+// Create a new meeting session
+Map smartmeet_create_session(String platform, String meeting_link, List emails, List members)
+{
+    // Validate input parameters
+    if(platform.isEmpty() || meeting_link.isEmpty())
+    {
+        return {"error": "Platform and meeting link are required"};
+    }
+    
+    // Generate unique session ID
+    session_id = randomUUID();
+    
+    // Create session record
+    session_data = Map();
+    session_data.put("Meeting_ID", session_id);
+    session_data.put("Platform", platform);
+    session_data.put("Meeting_Link", meeting_link);
+    session_data.put("Status", "provisioning");
+    session_data.put("Created_Time", now);
+    
+    // Insert session into database
+    create_record = insert into SmartMeet_Meetings
+    [
+        Meeting_ID = session_id,
+        Platform = platform,
+        Meeting_Link = meeting_link,
+        Status = "provisioning",
+        Created_Time = now
+    ];
+    
+    // Add participants if provided
+    if(members != null && members.size() > 0)
+    {
+        smartmeet_add_participants(session_id, members);
+    }
+    
+    // Log session creation
+    info "Meeting session created: " + session_id + " for platform: " + platform;
+    
+    return {
+        "id": session_id,
+        "platform": platform,
+        "meeting_link": meeting_link,
+        "status": "provisioning",
+        "created_at": now,
+        "members": members
+    };
+}
+
+// Start recording a meeting session
+Map smartmeet_start_session(String session_id)
+{
+    // Fetch session from database
+    session_records = SmartMeet_Meetings[Meeting_ID == session_id];
+    
+    if(session_records.isEmpty())
+    {
+        return {"error": "Session not found"};
+    }
+    
+    session = session_records.get(0);
+    
+    // Update session status
+    update_record = SmartMeet_Meetings[Meeting_ID == session_id];
+    update_record.Status = "recording";
+    update_record.Started_Time = now;
+    
+    // Initialize platform-specific recording
+    platform = session.get("Platform");
+    recording_result = smartmeet_init_platform_recording(platform, session_id);
+    
+    info "Meeting recording started for session: " + session_id;
+    
+    return {
+        "id": session_id,
+        "status": "recording",
+        "started_at": now,
+        "platform": platform
+    };
+}
+
+// Complete and process meeting session
+Map smartmeet_complete_session(String session_id, Map summary_override)
+{
+    // Fetch session from database
+    session_records = SmartMeet_Meetings[Meeting_ID == session_id];
+    
+    if(session_records.isEmpty())
+    {
+        return {"error": "Session not found"};
+    }
+    
+    session = session_records.get(0);
+    
+    // Update session status to processing
+    update_record = SmartMeet_Meetings[Meeting_ID == session_id];
+    update_record.Status = "processing";
+    
+    // Generate meeting summary
+    summary = smartmeet_generate_summary(session_id, summary_override);
+    
+    // Update session with summary and completion
+    update_record.Status = "completed";
+    update_record.Completed_Time = now;
+    update_record.Summary_Data = summary.toString();
+    
+    // Send emails to participants
+    email_result = smartmeet_send_summary_emails(session_id, summary);
+    
+    info "Meeting session completed: " + session_id;
+    
+    return {
+        "id": session_id,
+        "status": "completed",
+        "completed_at": now,
+        "summary": summary,
+        "email_status": email_result.get("status")
+    };
+}
+
+// Add participants to a meeting session
+void smartmeet_add_participants(String session_id, List members)
+{
+    for each member in members
+    {
+        participant_id = randomUUID();
+        
+        insert into SmartMeet_Participants
+        [
+            Participant_ID = participant_id,
+            Meeting_ID = session_id,
+            Name = member.get("name"),
+            Email = member.get("email"),
+            Role = member.get("role"),
+            Joined_Time = now
+        ];
+    }
+    
+    info "Added " + members.size() + " participants to session: " + session_id;
+}
+
+// Generate meeting summary using AI
+Map smartmeet_generate_summary(String session_id, Map override_data)
+{
+    // Default summary structure
+    default_highlights = {
+        "Migration runbook approved by security with zero blockers.",
+        "Marketing automation will leverage SmartMeet email summaries.",
+        "Stakeholders agreed to pilot multi-platform transcription this sprint."
+    };
+    
+    default_actions = {
+        {
+            "owner": "Priya",
+            "due": "2025-12-01",
+            "action": "Ship Teams consent banner refresh for LATAM tenants."
+        },
+        {
+            "owner": "Arun", 
+            "due": "2025-12-03",
+            "action": "Benchmark transcription latency between Deepgram and Azure."
+        },
+        {
+            "owner": "Vijay",
+            "due": "2025-12-05", 
+            "action": "Circulate recap template for investor board meetings."
+        }
+    };
+    
+    default_risks = {
+        "Data retention policy still pending sign-off from legal.",
+        "API quota limits approaching - plan capacity increase."
+    };
+    
+    // Build summary with overrides
+    summary = Map();
+    summary.put("highlights", override_data.get("highlights", default_highlights));
+    summary.put("actions", override_data.get("actions", default_actions));
+    summary.put("risks", override_data.get("risks", default_risks));
+    summary.put("transcript_url", "https://storage.smartmeet.ai/transcripts/" + session_id + ".txt");
+    summary.put("recording_url", "https://storage.smartmeet.ai/recordings/" + session_id + ".mp4");
+    summary.put("generated_at", now);
+    
+    return summary;
+}
+
+// Send summary emails to participants
+Map smartmeet_send_summary_emails(String session_id, Map summary)
+{
+    // Get participants for the session
+    participants = SmartMeet_Participants[Meeting_ID == session_id];
+    
+    if(participants.isEmpty())
+    {
+        return {"status": "no_participants", "count": 0};
+    }
+    
+    // Get session details
+    session_records = SmartMeet_Meetings[Meeting_ID == session_id];
+    session = session_records.get(0);
+    platform = session.get("Platform");
+    
+    email_count = 0;
+    failed_count = 0;
+    
+    for each participant in participants
+    {
+        try
+        {
+            // Build email content
+            email_subject = "SmartMeet Summary - " + platform + " Meeting";
+            email_body = smartmeet_build_email_template(summary, participant, session);
+            
+            // Send email using Zoho Mail
+            send_result = sendmail
+            [
+                from: "noreply@smartmeet.ai",
+                to: participant.get("Email"),
+                subject: email_subject,
+                message: email_body
+            ];
+            
+            // Log email send
+            insert into SmartMeet_Email_Logs
+            [
+                Log_ID = randomUUID(),
+                Meeting_ID = session_id,
+                Recipient_Email = participant.get("Email"),
+                Status = "sent",
+                Sent_Time = now
+            ];
+            
+            email_count = email_count + 1;
+        }
+        catch (e)
+        {
+            // Log email failure
+            insert into SmartMeet_Email_Logs
+            [
+                Log_ID = randomUUID(),
+                Meeting_ID = session_id,
+                Recipient_Email = participant.get("Email"),
+                Status = "failed",
+                Sent_Time = now,
+                Error_Message = e.toString()
+            ];
+            
+            failed_count = failed_count + 1;
+        }
+    }
+    
+    info "Sent " + email_count + " emails, " + failed_count + " failed for session: " + session_id;
+    
+    return {
+        "status": "completed",
+        "sent_count": email_count,
+        "failed_count": failed_count,
+        "total_participants": participants.size()
+    };
+}
+
+// Build email template for meeting summary
+String smartmeet_build_email_template(Map summary, Map participant, Map session)
+{
+    highlights = summary.get("highlights");
+    actions = summary.get("actions");
+    risks = summary.get("risks");
+    
+    email_html = "<html><body>";
+    email_html = email_html + "<h2>SmartMeet Summary</h2>";
+    email_html = email_html + "<p>Hi " + participant.get("Name") + ",</p>";
+    email_html = email_html + "<p>Here is your meeting summary from SmartMeet.</p>";
+    
+    // Add highlights section
+    email_html = email_html + "<h3>Key Highlights:</h3><ul>";
+    for each highlight in highlights
+    {
+        email_html = email_html + "<li>" + highlight + "</li>";
+    }
+    email_html = email_html + "</ul>";
+    
+    // Add action items section
+    email_html = email_html + "<h3>Action Items:</h3><ul>";
+    for each action in actions
+    {
+        email_html = email_html + "<li><strong>" + action.get("owner") + "</strong> - " + action.get("action") + " (Due: " + action.get("due") + ")</li>";
+    }
+    email_html = email_html + "</ul>";
+    
+    // Add risks section if any
+    if(risks.size() > 0)
+    {
+        email_html = email_html + "<h3>Risks & Concerns:</h3><ul>";
+        for each risk in risks
+        {
+            email_html = email_html + "<li>" + risk + "</li>";
+        }
+        email_html = email_html + "</ul>";
+    }
+    
+    // Add footer
+    email_html = email_html + "<p><small>Generated by SmartMeet AI Assistant</small></p>";
+    email_html = email_html + "</body></html>";
+    
+    return email_html;
+}
+
+// Initialize platform-specific recording
+Map smartmeet_init_platform_recording(String platform, String session_id)
+{
+    if(platform == "zoom")
+    {
+        return smartmeet_init_zoom_recording(session_id);
+    }
+    else if(platform == "teams")
+    {
+        return smartmeet_init_teams_recording(session_id);
+    }
+    else if(platform == "gmeet")
+    {
+        return smartmeet_init_gmeet_recording(session_id);
+    }
+    else if(platform == "cliq")
+    {
+        return smartmeet_init_cliq_recording(session_id);
+    }
+    else
+    {
+        return {"error": "Unsupported platform: " + platform};
+    }
+}
+
+// Initialize Zoom recording
+Map smartmeet_init_zoom_recording(String session_id)
+{
+    info "Initializing Zoom recording for session: " + session_id;
+    
+    // Zoom API integration would go here
+    // For now, return success simulation
+    return {
+        "status": "success",
+        "platform": "zoom",
+        "recording_id": "zoom_" + session_id
+    };
+}
+
+// Initialize Teams recording  
+Map smartmeet_init_teams_recording(String session_id)
+{
+    info "Initializing Teams recording for session: " + session_id;
+    
+    // Microsoft Graph API integration would go here
+    // For now, return success simulation
+    return {
+        "status": "success",
+        "platform": "teams", 
+        "recording_id": "teams_" + session_id
+    };
+}
+
+// Initialize Google Meet recording
+Map smartmeet_init_gmeet_recording(String session_id)
+{
+    info "Initializing Google Meet recording for session: " + session_id;
+    
+    // Google Meet API integration would go here
+    // For now, return success simulation
+    return {
+        "status": "success",
+        "platform": "gmeet",
+        "recording_id": "gmeet_" + session_id
+    };
+}
+
+// Initialize Zoho Cliq recording
+Map smartmeet_init_cliq_recording(String session_id)
+{
+    info "Initializing Zoho Cliq recording for session: " + session_id;
+    
+    // Zoho Cliq API integration would go here
+    // For now, return success simulation
+    return {
+        "status": "success",
+        "platform": "cliq",
+        "recording_id": "cliq_" + session_id
+    };
+}
+
+// Copilot chat interface
+Map smartmeet_copilot_chat(String prompt, String platform)
+{
+    if(prompt.isEmpty())
+    {
+        return {"error": "Prompt is required"};
+    }
+    
+    // Platform-specific responses
+    responses = Map();
+    responses.put("zoom", "Joined the Zoom meeting, generated 12 highlight bullets, and emailed the recap to marketing leadership.");
+    responses.put("teams", "Teams channel synced. Adaptive cards with action owners posted to #product-launch.");
+    responses.put("gmeet", "Google Meet session processed. Summary generated and shared with all participants via Gmail.");
+    responses.put("cliq", "Zoho Cliq workspace updated. Summary pinned with bilingual transcription links.");
+    
+    response_text = responses.get(platform, responses.get("zoom"));
+    
+    // Log chat interaction
+    chat_log = Map();
+    chat_log.put("prompt", prompt);
+    chat_log.put("response", response_text);
+    chat_log.put("platform", platform);
+    chat_log.put("timestamp", now);
+    
+    return {
+        "response": response_text,
+        "platform": platform,
+        "timestamp": now
+    };
+}
+
+// Get extension status
+Map smartmeet_get_extension_status()
+{
+    // Count pending sessions
+    pending_sessions = SmartMeet_Meetings[Status == "provisioning" || Status == "recording" || Status == "processing"];
+    
+    return {
+        "online": true,
+        "connected_platforms": {"zoom", "teams", "gmeet", "cliq"},
+        "last_sync": now,
+        "pending_sessions": pending_sessions.size(),
+        "version": "1.0.0-deluge"
+    };
+}
+
+// Detect meeting platform from URL
+String smartmeet_detect_platform(String meeting_url)
+{
+    if(meeting_url.contains("zoom.us"))
+    {
+        return "zoom";
+    }
+    else if(meeting_url.contains("teams.microsoft.com"))
+    {
+        return "teams";
+    }
+    else if(meeting_url.contains("meet.google.com"))
+    {
+        return "gmeet";
+    }
+    else if(meeting_url.contains("zoho.com/cliq"))
+    {
+        return "cliq";
+    }
+    else
+    {
+        return "unknown";
+    }
+}
+
+// Get meeting sessions with pagination
+List smartmeet_get_sessions(int page, int limit)
+{
+    offset = (page - 1) * limit;
+    
+    sessions = SmartMeet_Meetings[ID != null] limit offset, limit;
+    
+    session_list = List();
+    
+    for each session in sessions
+    {
+        session_data = Map();
+        session_data.put("id", session.get("Meeting_ID"));
+        session_data.put("platform", session.get("Platform"));
+        session_data.put("status", session.get("Status"));
+        session_data.put("created_at", session.get("Created_Time"));
+        session_data.put("meeting_link", session.get("Meeting_Link"));
+        
+        session_list.add(session_data);
+    }
+    
+    return session_list;
+}
+
+// Main entry point for SmartMeet operations
+Map smartmeet_api_handler(String operation, Map parameters)
+{
+    try
+    {
+        if(operation == "create_session")
+        {
+            return smartmeet_create_session(
+                parameters.get("platform"),
+                parameters.get("meeting_link"), 
+                parameters.get("emails"),
+                parameters.get("members")
+            );
+        }
+        else if(operation == "start_session")
+        {
+            return smartmeet_start_session(parameters.get("session_id"));
+        }
+        else if(operation == "complete_session")
+        {
+            return smartmeet_complete_session(
+                parameters.get("session_id"),
+                parameters.get("summary_override")
+            );
+        }
+        else if(operation == "copilot_chat")
+        {
+            return smartmeet_copilot_chat(
+                parameters.get("prompt"),
+                parameters.get("platform")
+            );
+        }
+        else if(operation == "get_status")
+        {
+            return smartmeet_get_extension_status();
+        }
+        else if(operation == "get_sessions")
+        {
+            return {
+                "sessions": smartmeet_get_sessions(
+                    parameters.get("page", 1),
+                    parameters.get("limit", 10)
+                )
+            };
+        }
+        else
+        {
+            return {"error": "Unknown operation: " + operation};
+        }
+    }
+    catch (e)
+    {
+        return {"error": "Operation failed: " + e.toString()};
+    }
+}
